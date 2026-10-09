@@ -1,9 +1,16 @@
 """
-felucca_link.py — FM-1 / Felucca 直连 SysEx 核心库
+felucca_link.py — FM-1 / Felucca 直连 SysEx 核心库（已按 1.1.5.1 实测校准）
 
 零第三方依赖，仅用 ctypes 直调 Windows winmm.dll。
 协议帧：F0 7D 46 4C <cmd & 0x7F> <args...> F7
-固件：FELUCCA v1.0.2（其他固件协议可能不同，勿混用）
+固件：FELUCCA 1.1.5.1（实测：14 引擎 / 64 步 / 4 轨 / 99 轨道参数）
+      （1.0.2 为 91 参数，已过时）
+
+⚠️ 与 SLOOP 的关键差异：
+  - 命令 33 = SONG（SLOOP 是 DRUM_STEP）
+  - 写步带 chance 字节（SLOOP 无）
+  - 8 鼓位用 hit/acc 位掩码（SLOOP 用 16 lane 掩码）
+  - 1.1.5.1 读步回复尾部多 1 字节（忽略即可）
 """
 
 import ctypes
@@ -28,25 +35,43 @@ CMD_WATCH = 22
 CMD_TRACK = 27
 CMD_TRACK_STEP = 30
 CMD_TRACK_PARAM = 31
-CMD_SONG = 33
+CMD_SONG = 33            # ⚠️ Felucca：SONG 播放链（SLOOP 是 DRUM_STEP）
 
 HDR = [0x7D, 0x46, 0x4C]
 
-# ---------- 轨道参数 ID ----------
-P_LVL, P_ATK, P_DEC, P_SUS, P_REL, P_FLT, P_PIT, P_SHP, P_FX = 0, 1, 2, 3, 4, 5, 6, 7, 8
+# ---------- 轨道参数 ID（1.1.5.1：99 个，0-98） ----------
+P_LVL, P_ATK, P_DEC, P_SUS, P_REL = 0, 1, 2, 3, 4
+P_FLT, P_PIT, P_SHP, P_FX = 5, 6, 7, 8
 P_LFO1_RATE, P_LFO1_WAVE, P_LFO1_PHS, P_LFO1_FADE = 9, 10, 11, 12
 P_LFO2_PIT, P_LFO2_FLT, P_LFO2_SHP, P_LFO2_AMP = 13, 14, 15, 16
-P_ARP_MODE, P_ARP_RATE, P_ARP_OCT, P_ARP_GATE, P_ARP_SWG = 17, 18, 19, 20, 21
-P_ARP_PROB, P_ARP_HOLD, P_ARP_ORD = 22, 23, 24
+P_ARP_MODE, P_ARP_RATE, P_ARP_OCT, P_ARP_GATE = 17, 18, 19, 20
+P_ARP_SWG, P_ARP_PROB, P_ARP_HOLD, P_ARP_ORD = 21, 22, 23, 24
 P_SCL_ROOT, P_SCL, P_QNT, P_TRN = 25, 26, 27, 28
 P_LEN, P_DIV, P_SWG, P_GATE = 29, 30, 31, 32
 P_DST, P_CHO, P_DLY, P_REV = 33, 34, 35, 36
 P_VCE, P_GLD, P_PAN, P_MUTE = 37, 38, 39, 40
-P_DTUNE, P_SLCR = 44, 45
-P_A_WAVE, P_A_DTN, P_A_MIX, P_A_NOIS = 83, 84, 85, 86
-P_A_CUT, P_A_RES, P_A_DRV, P_A_KTR = 87, 88, 89, 90
+P_GLMOD, P_PRIO, P_ALLOC, P_DTUNE, P_SLCR = 41, 42, 43, 44, 45
+P_PAT, P_RATE, P_DEPTH = 46, 47, 48
+# 调制矩阵（4 组 SRC×DST×AMT）
+P_SRC1, P_DST1, P_AMT1 = 49, 50, 51
+P_SRC2, P_DST2, P_AMT2 = 52, 53, 54
+P_SRC3, P_DST3, P_AMT3 = 55, 56, 57
+P_SRC4, P_DST4, P_AMT4 = 58, 59, 60
+# 4×ENV（每组 ATK/DEC/SUS/REL/LVL）
+P_ENV1_ATK, P_ENV1_DEC, P_ENV1_SUS, P_ENV1_REL, P_ENV1_LVL = 61, 62, 63, 64, 65
+P_ENV2_ATK, P_ENV2_DEC, P_ENV2_SUS, P_ENV2_REL, P_ENV2_LVL = 66, 67, 68, 69, 70
+P_ENV3_ATK, P_ENV3_DEC, P_ENV3_SUS, P_ENV3_REL, P_ENV3_LVL = 71, 72, 73, 74, 75
+P_ENV4_ATK, P_ENV4_DEC, P_ENV4_SUS, P_ENV4_REL, P_ENV4_LVL = 76, 77, 78, 79, 80
+# 和弦模式
+P_CHRD, P_VOIC = 81, 82
+# 鼓 8 件套音量（1.1.5.1 新增，原 1.0.2 的 ANALOG EDIT 位置）
+P_DRUM_KICK, P_DRUM_SNARE, P_DRUM_CLAP, P_DRUM_HATCL = 83, 84, 85, 86
+P_DRUM_HATOP, P_DRUM_TOM, P_DRUM_RIM, P_DRUM_BELL = 87, 88, 89, 90
+# ANALOG EDIT（1.0.2 是 83-90，1.1.5.1 后移 +8）
+P_A_WAVE, P_A_DTN, P_A_MIX, P_A_NOIS = 91, 92, 93, 94
+P_A_CUT, P_A_RES, P_A_DRV, P_A_KTR = 95, 96, 97, 98
 
-# ---------- 全局参数 ID ----------
+# ---------- 全局参数 ID（27 个，0-24） ----------
 G_BPM, G_SWG, G_CLK, G_TUNE, G_TIME = 0, 1, 2, 3, 4
 G_DLY_FDBK, G_DLY_COLR, G_DLY_MIX, G_DLY_SIZE, G_DLY_DAMP = 5, 6, 7, 8, 9
 G_CRT, G_CDP, G_MIDI, G_SYNC, G_ROUT = 10, 11, 12, 13, 14
@@ -61,12 +86,13 @@ ENGINES = {
 }
 ENGINE_NAMES = {v: k for k, v in ENGINES.items()}
 
-DIVS = {'1/4': 0, '1/8': 1, '1/16': 2, '1/32': 3, '8T': 4, '16T': 5, '1/2': 6, '1/1': 7}
+DIVS = {'1/4': 0, '1/8': 1, '1/16': 2, '1/32': 3,
+        '8T': 4, '16T': 5, '1/2': 6, '1/1': 7}
 DIV_NAMES = {v: k for k, v in DIVS.items()}
 
 TIME_NOTE, TIME_TIE, TIME_REST = 0, 1, 2
 
-# 8 鼓位 lane 对应的 GM 音高
+# 8 鼓位 lane 对应的 GM 音
 DRUM_LANES = {
     0: ('KICK',  36),
     1: ('SNARE', 38),
@@ -77,19 +103,27 @@ DRUM_LANES = {
     6: ('RIM',   37),
     7: ('BELL',  56),
 }
+LANE_BY_NAME = {name: idx for idx, (name, _) in DRUM_LANES.items()}
+
+# ANALOG 预设（1.1.5.1，pcount=99）
+ANALOG_PRESETS = {
+    'SOFT PAD': 1, 'SINE KEY': 5, 'SUB BASS': 7, 'BRASS': 9,
+}
 
 # ---------- winmm 结构体 ----------
 class MIDIHDR(ctypes.Structure):
+    """⚠️ 与 sloop_link.py 逐字段一致（实测这是唯一能稳定收全帧的声明）。
+    lpData 用 c_void_p、dwUser/reserved 用 c_ulonglong，共 88B。"""
     _fields_ = [
-        ("lpData", ctypes.c_char_p),
-        ("dwBufferLength", ctypes.c_uint32),
-        ("dwBytesRecorded", ctypes.c_uint32),
-        ("dwUser", ctypes.c_void_p),       # ⚠️ 必须 8 字节指针
-        ("dwFlags", ctypes.c_uint32),
+        ("lpData", ctypes.c_void_p),
+        ("dwBufferLength", wintypes.DWORD),
+        ("dwBytesRecorded", wintypes.DWORD),
+        ("dwUser", ctypes.c_ulonglong),
+        ("dwFlags", wintypes.DWORD),
         ("lpNext", ctypes.c_void_p),
-        ("reserved", ctypes.c_void_p),     # ⚠️ 必须 8 字节指针
-        ("dwOffset", ctypes.c_uint32),
-        ("dwReserved", ctypes.c_void_p * 8),
+        ("reserved", ctypes.c_ulonglong),
+        ("dwOffset", wintypes.DWORD),
+        ("dwReserved", ctypes.c_void_p * 4),
     ]
 
 class MIDIINCAPS(ctypes.Structure):
@@ -169,12 +203,10 @@ def find_felucca():
 
 # ---------- 编码 ----------
 def v14enc(v):
-    """v + 8192 → [lo & 0x7F, (lo >> 7) & 0x7F]"""
     x = v + 8192
     return [x & 0x7F, (x >> 7) & 0x7F]
 
 def v14dec(lo, hi):
-    """(lo + (hi << 7)) - 8192"""
     return (lo + (hi << 7)) - 8192
 
 def hitsEnc(hit, acc):
@@ -197,6 +229,7 @@ class FeluccaLink:
         self.h_in = None
         self.h_out = None
         self._rx_queue = []
+        self._rx_acc = bytearray()   # 累积未切帧的输入字节（按 F7 切完整帧）
         self._in_buf = None
         self._in_hdr = None
         self._cb_ref = None
@@ -209,23 +242,40 @@ class FeluccaLink:
         # ---- 输入 ----
         h = wintypes.HANDLE()
         self._in_buf = ctypes.create_string_buffer(8192)
-        self._in_hdr = MIDIHDR()
-        self._in_hdr.lpData = ctypes.cast(self._in_buf, ctypes.c_char_p)
-        self._in_hdr.dwBufferLength = 8192
+        # ⚠️ 位置式构造（实测稳定收全帧的关键）
+        self._in_hdr = MIDIHDR(ctypes.addressof(self._in_buf), 8192, 0, 0, 0, 0, 0, 0,
+                               (ctypes.c_void_p * 4)())
 
-        CB = ctypes.WINFUNCTYPE(None, wintypes.HANDLE, wintypes.UINT,
-                                ctypes.POINTER(MIDIHDR), ctypes.c_void_p)
+        # ⚠️ winmm 回调必须是 5 参数
+        # void CALLBACK MidiInProc(HMIDIIN, UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR)
+        CB = ctypes.WINFUNCTYPE(None,
+                                wintypes.HANDLE,     # hMidiIn
+                                wintypes.UINT,       # wMsg
+                                ctypes.c_void_p,     # dwInstance
+                                ctypes.c_void_p,     # dwParam1 (MIDIHDR*)
+                                ctypes.c_void_p)     # dwParam2
 
-        def _cb(handle, msg, hdr_ptr, inst):
-            if msg == MIM_LONGDATA:
+        def _cb(hMidiIn, wMsg, dwInstance, dwParam1, dwParam2):
+            if wMsg == MIM_LONGDATA:
+                hdr_ptr = ctypes.cast(dwParam1, ctypes.POINTER(MIDIHDR))
                 hdr = hdr_ptr.contents
                 if hdr.dwBytesRecorded > 0:
                     data = ctypes.string_at(hdr.lpData, hdr.dwBytesRecorded)
-                    self._rx_queue.append(bytes(data))
+                    # ⚠️ 必须累积并按 F7 切完整帧：设备会连续推多帧
+                    # （如选轨后的 TRACK 通知 rc=27 + 真正的回复帧）
+                    self._rx_acc += data
+                    while True:
+                        i = self._rx_acc.find(bytes([0xF7]))
+                        if i < 0:
+                            break
+                        frame = bytes(self._rx_acc[:i + 1])
+                        del self._rx_acc[:i + 1]
+                        self._rx_queue.append(frame)
                 winmm.midiInAddBuffer(self.h_in, hdr_ptr, ctypes.sizeof(MIDIHDR))
         self._cb_ref = CB(_cb)
 
-        rc = winmm.midiInOpen(ctypes.byref(h), in_idx, self._cb_ref, None, CALLBACK_FUNCTION)
+        rc = winmm.midiInOpen(ctypes.byref(h), in_idx,
+                              ctypes.cast(self._cb_ref, ctypes.c_void_p), None, CALLBACK_FUNCTION)
         if rc != 0:
             raise RuntimeError(f'midiInOpen 失败: {rc}')
         self.h_in = h
@@ -243,10 +293,15 @@ class FeluccaLink:
         return self
 
     def close(self):
+        """⚠️ 不要调用 midiInReset：在有 pending buffer 时会与回调线程死锁（实测必现）。
+        与 sloop_link.py 一致：Stop → UnprepareHeader → Close。"""
         if self.h_in:
             try:
                 winmm.midiInStop(self.h_in)
-                winmm.midiInReset(self.h_in)
+            except Exception:
+                pass
+            try:
+                winmm.midiInUnprepareHeader(self.h_in, ctypes.byref(self._in_hdr), ctypes.sizeof(MIDIHDR))
             except Exception:
                 pass
             winmm.midiInClose(self.h_in)
@@ -255,12 +310,10 @@ class FeluccaLink:
             winmm.midiOutClose(self.h_out)
             self.h_out = None
 
-    # ---- 发送 ----
     def send(self, frame: bytes):
-        buf = ctypes.create_string_buffer(frame, len(frame))
-        hdr = MIDIHDR()
-        hdr.lpData = ctypes.cast(buf, ctypes.c_char_p)
-        hdr.dwBufferLength = len(frame)
+        buf = ctypes.create_string_buffer(frame)  # ⚠️ 带 NUL
+        hdr = MIDIHDR(ctypes.addressof(buf), len(frame), 0, 0, 0, 0, 0, 0,
+                      (ctypes.c_void_p * 4)())
         winmm.midiOutPrepareHeader(self.h_out, ctypes.byref(hdr), ctypes.sizeof(MIDIHDR))
         winmm.midiOutLongMsg(self.h_out, ctypes.byref(hdr), ctypes.sizeof(MIDIHDR))
         for _ in range(400):
@@ -272,7 +325,6 @@ class FeluccaLink:
     def send_cmd(self, cmd, args):
         self.send(build_frame(cmd, args))
 
-    # ---- 收发 ----
     def _poll_rx(self, timeout=1.0):
         end = time.time() + timeout
         while time.time() < end:
@@ -282,35 +334,42 @@ class FeluccaLink:
         return None
 
     def request(self, cmd, args, timeout=2.0):
+        """发命令并等 rc==cmd 的完整回复帧。跳过其它推送帧（如选轨后的 TRACK 通知 rc=27）。"""
         self._rx_queue.clear()
         self.send_cmd(cmd, args)
-        return self._poll_rx(timeout)
+        end = time.time() + timeout
+        while time.time() < end:
+            fr = self._poll_rx(max(0.02, min(0.2, end - time.time())))
+            if fr is None:
+                continue
+            if len(fr) < 6 or fr[0] != 0xF0 or fr[-1] != 0xF7 or fr[1:4] != bytes(HDR):
+                continue
+            if fr[4] == (cmd & 0x7F):
+                return fr
+        return None
 
     # ---- 高层 API ----
     def info(self):
-        """解析 INFO(1) 回复。
+        """解析 INFO 回复。Felucca 1.1.5.1 实测：
+        version='FELUCCA 1.1.5.1', nengines=14, pcount=99, gcount=27,
+        nstep=64, pe0=91, ntrk=4, trailer=[16,85,1,9,...]（30B）
 
-        帧体: version(\\0串) nengines(1B) pcount(1B) gcount(1B) nstep(1B) pe0(1B)
-              engines×nengines(\\0串) ntrk(1B) trailer[...]
+        结构: version(\\0串) nengines(1B) pcount(1B) gcount(1B)
+              nstep(1B) pe0(1B) engines×nengines(\\0串) ntrk(1B) trailer[...]
 
-        ⚠️ 关键修正（2026-10-06 实测）：
-        - ntrk 是解析流 pop 出来的独立 1 字节，不在 trailer 数组内
-        - trailer[0] === 16 → chainRows = 16
-        - trailer[0]==16 && trailer[1]==0x55 && trailer[2]==1 → uiCaps = trailer[3] & 15
+        trailer[0]===16 → chainRows=16
+        trailer[0]==16 && trailer[1]==0x55 && trailer[2]==1 → uiCaps = trailer[3] & 15
         """
         r = self.request(CMD_INFO, [])
         if not r or len(r) < 6:
             return None
         body = list(r[5:-1])
-
-        # 变长版本串
         try:
             z = body.index(0x00)
         except ValueError:
             return {'raw': body}
         version = bytes(body[:z]).decode('ascii', errors='replace')
         p = body[z+1:]
-
         out = {'version': version}
         if len(p) >= 5:
             out['nengines'] = p[0]
@@ -318,36 +377,24 @@ class FeluccaLink:
             out['gcount']   = p[2]
             out['nstep']    = p[3]
             out['pe0']      = p[4]
-
         # 跳过 engines 串（nengines 个 \0 结尾串）
         rest = p[5:]
-        engines = []
         i = 0
         want = out.get('nengines', 0)
-        while len(engines) < want and i < len(rest):
+        for _ in range(want):
             try:
                 zz = rest.index(0x00, i)
             except ValueError:
                 break
-            engines.append(bytes(rest[i:zz]).decode('ascii', errors='replace'))
             i = zz + 1
-        out['engines'] = engines
-
-        # ntrk：解析流中的独立 1 字节（不在 trailer 内）
+        # ntrk：独立 1 字节
         if i < len(rest):
             out['ntrk'] = rest[i]
             i += 1
-        else:
-            out['ntrk'] = None
-
-        # trailer = ntrk 之后的剩余字节
         trailer = rest[i:]
         out['trailer_raw'] = list(trailer)
-
         if trailer:
-            # chainRows：trailer[0] === 16
             out['chainRows'] = 16 if trailer[0] == 16 else 0
-            # uiCaps：trailer[0]==16 && trailer[1]==0x55 && trailer[2]==1 → trailer[3] & 15
             if (trailer[0] == 16 and len(trailer) >= 4
                     and trailer[1] == 0x55 and trailer[2] == 1):
                 out['uiCaps'] = trailer[3] & 15
@@ -356,11 +403,9 @@ class FeluccaLink:
         else:
             out['chainRows'] = 0
             out['uiCaps'] = None
-
         return out
 
     def desc(self, scope, pid):
-        """scope: 0=轨道 / 1=全局。返回 dict。"""
         r = self.request(CMD_DESC, [scope, pid])
         if not r or len(r) < 11:
             return None
@@ -383,16 +428,6 @@ class FeluccaLink:
         return {'scope': scope_, 'id': id_, 'fmt': fmt,
                 'min': mn, 'max': mx, 'def': dv,
                 'label': label, 'unit': unit}
-
-    def set_global(self, pid, value):
-        self.send_cmd(CMD_SET, [1, pid] + v14enc(value))
-
-    def get_global(self, pid):
-        r = self.request(CMD_GET, [1, pid])
-        if not r or len(r) < 8:
-            return None
-        b = list(r[5:-1])
-        return v14dec(b[2], b[3])
 
     def select_track(self, track):
         self.send_cmd(CMD_TRACK, [track])
@@ -422,12 +457,18 @@ class FeluccaLink:
             return v14dec(b[2], b[3])
         self.send_cmd(CMD_TRACK_PARAM, [track, pid] + v14enc(value))
 
+    def set_global(self, pid, value):
+        self.send_cmd(CMD_SET, [1, pid] + v14enc(value))
+
     # ---- 步进 ----
     def write_step(self, track, step, notes, time_mode=TIME_NOTE,
                    velocity=100, flags=0, chance=100, hit=0, acc=0):
         """
+        写步（Felucca 带 chance）：
+          [tr, i, n, note0..3, time, flags, vel, hit, acc, hi, chance]
         notes: MIDI 音高列表，最多 4 个。
         time_mode: 0=NOTE 1=TIE 2=REST
+        hit/acc: 8 鼓位 lane 掩码（非鼓轨 = 0）
         """
         n = min(len(notes), 4)
         nb = [0] * 4
@@ -438,7 +479,11 @@ class FeluccaLink:
         self.send_cmd(CMD_TRACK_STEP, args)
 
     def read_step(self, track, step):
-        """⚠️ 请求是 [i] 不是 [tr, i]。先选轨。"""
+        """
+        读步。回复（v1.1.5.1，14B）：
+          [i, n, note0..3, time, flags, vel, hit, acc, hi, chance, extra?]
+        ⚠️ v1.1.5.1 尾部多 1 字节（实测 = 1），忽略即可。
+        """
         self.select_track(track)
         time.sleep(0.08)
         r = self.request(CMD_STEP_GET, [step])
@@ -456,13 +501,16 @@ class FeluccaLink:
             'time': b[6], 'flags': b[7], 'vel': b[8],
             'hit': hit, 'acc': acc,
             'chance': b[12] if len(b) > 12 else 100,
+            'extra': b[13] if len(b) > 13 else None,   # v1.1.5.1 新增尾字节
+            'raw': b,
         }
 
-    # ---- SONG ----
+    # ---- SONG 播放 ----
     def play_song(self, rows):
         """
         rows: [(slot, repeat), ...]
         发送 op=1 设行 + op=2 播放。
+        ⚠️ 只发 op=1 是"配置行"，不出声！必须再发 op=2 才播放。
         """
         args = [1, len(rows)]
         for slot, rep in rows:
