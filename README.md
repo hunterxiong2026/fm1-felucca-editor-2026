@@ -22,6 +22,14 @@
 
 ---
 
+## 原作者支持
+
+这个项目获得了 Felucca 作者 [@hugelton](https://github.com/hugelton) 的认可。他在 [Discussion #122](https://github.com/hugelton/Felucca/discussions/122#discussioncomment-18794682) 中回复：
+
+> "Driving Felucca through an agent is a fun idea, and I can see how it helps with the small screen and controls. I'm glad the editor protocol was useful for it." — @hugelton
+
+---
+
 ## 前置要求
 
 | 项目 | 要求 |
@@ -38,8 +46,8 @@
 ## 安装
 
 ```powershell
-git clone https://github.com/hunterxiong2026/felucca-editor.git
-cd felucca-editor
+git clone https://github.com/hunterxiong2026/fm1-felucca-editor-2026.git
+cd fm1-felucca-editor-2026
 
 # 建独立 venv（勿装进系统 Python）
 python -m venv scripts\venv
@@ -115,6 +123,7 @@ python scripts\felucca_cli.py stop               # 停止播放
 | `felucca_cli.py` | 命令行工具 |
 | `felucca_arrange.py` | 单槽一键编曲（写 4 轨 → 存槽 → 播放）|
 | `felucca_arrange_ab.py` | 双槽链编曲 |
+| `felucca_arrange_chain.py` | 多槽链编曲（N 槽顺序）|
 | `play_slot.py` / `play_chain.py` | 仅播放脚本 |
 
 ---
@@ -132,6 +141,7 @@ felucca-editor/
 │   ├── felucca_cli.py
 │   ├── felucca_arrange.py
 │   ├── felucca_arrange_ab.py
+│   ├── felucca_arrange_chain.py
 │   ├── play_slot.py
 │   └── play_chain.py
 ├── reference/
