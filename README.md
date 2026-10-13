@@ -1,195 +1,190 @@
-# Felucca Editor Skill
+# Felucca Editor
 
-> 用自然语言控制 M-VAVE FM-1 合成器（Felucca 固件），完成音色设计、多轨编曲与 SONG 播放。
+> 通过直连 SysEx（ctypes + winmm）操作 M-VAVE FM-1 上的 **Felucca v1.5** 固件，实现音色参数编辑、多轨编曲、项目槽位管理与 SONG 播放链。
 
-[![Version](https://img.shields.io/badge/version-1.2.0-blue)]()
-[![License](https://img.shields.io/badge/license-MIT-green)]()
+![Firmware](https://img.shields.io/badge/firmware-v1.5-blue)
+![Python](https://img.shields.io/badge/python-3.10+-green)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-yellow)
 
 ---
 
 ## 这是什么
 
-一个 DeepSeek Harness（DSH）Skill，通过**直连 SysEx**（ctypes + winmm.dll）
-操控 FM-1 上的 Felucca 固件。你可以用对话指挥 AI Agent：
+一套**零第三方依赖**的 Python 脚本（仅用 `ctypes` 直调 Windows `winmm.dll`），向 M-VAVE FM-1 发送 SysEx 帧，控制 Felucca v1.5 固件：
 
-- 写一段多轨编曲（旋律 / 贝斯 / 和声 / 鼓）
-- 修改音色参数（滤波器、包络、LFO、琶音、调制矩阵等）
-- 存/读项目槽位（A/B/C/D）
-- 播放 SONG 链（多槽位顺序播放）
+- **4 轨编曲**：旋律 / 和弦 / 贝斯 / 鼓
+- **111 个轨道参数 + 27 个全局参数**（v1.5）
+- **64 步 / 轨**，4 个项目槽位，16 行 SONG 播放链
+- **14 种合成引擎**：ANALOG / PHASE / LOFI / SAMPLE / VOICE / DRUM / FM6 …
 
-**网页 / Web MIDI 方案已退役**。当前直连方案写入速度快 7-8 倍
-（单步 RTT ≈0.12s），无挂起、无回读竞态。
+同时是一份 **Claude Skill**（`SKILL.md`）：AI 可据此直接生成 `arrangement.json` 并写入设备。
 
 ---
 
-## 社区认可
+## 前置要求
 
-Felucca 固件作者 **kurogedelic** 在官方 GitHub 讨论中回复并认可了本项目：
+| 项目 | 要求 |
+|---|---|
+| 硬件 | M-VAVE FM-1 |
+| 固件 | **FELUCCA v1.5**（pcount=111 / pe0=103 / chainRows=16）|
+| 运行时 | Python **3.10+**（独立 venv，不装系统 Python）|
+| 平台 | **Windows**（依赖 winmm.dll）|
 
-> "Driving Felucca through an agent is a fun idea, and I can see how it helps
-> with the small screen and controls. I haven't tried it myself yet, but I'm glad
-> the editor protocol was useful for it."
->
-> — [kurogedelic, Felucca Discussion #122](https://github.com/hugelton/Felucca/discussions/122#discussioncomment-18794682)
+> ⚠️ 直连前**必须关闭浏览器 / 任何 Web MIDI 会话**——设备输入独占。
 
-本项目通过**逆向** Felucca 的编辑器协议实现自动化控制，**未使用其源码**，
-不属于 Felucca 的衍生产品（法律层面），而是 Felucca 生态的配套工具。
+---
+
+## 安装
+
+```powershell
+git clone https://github.com/hunterxiong2026/felucca-editor.git
+cd felucca-editor
+
+# 建独立 venv（勿装进系统 Python）
+python -m venv scripts\venv
+scripts\venv\Scripts\activate
+
+# 无第三方依赖；如需 MIDI 导出，再装：
+pip install mido
+```
+
+---
+
+## 快速开始
+
+### 1. 确认设备
+
+```powershell
+python scripts\felucca_cli.py info
+# → version='FELUCCA v1.5', pcount=111, pe0=103, ntrk=4
+```
+
+系统里有多个 "Felucca" 设备时，脚本会**自动探测固件、跳过 SLOOP**：
+
+```powershell
+python scripts\felucca_link.py     # 枚举全部 MIDI 设备并演示匹配
+```
+
+精确指定某台设备：
+
+```powershell
+$env:FELUCCA_MIDI_NAME="3 - Felucca"
+```
+
+### 2. 一键编曲
+
+编写 `arrangement.json`（4 轨结构见 `felucca_arrange.py` 头部注释），然后：
+
+```powershell
+python scripts\felucca_arrange.py <slot> <bpm> <repeat>
+
+# 例：写入槽 3，BPM 72，播放 1 遍
+python scripts\felucca_arrange.py 3 72 1
+```
+
+### 3. 双槽链
+
+```powershell
+python scripts\felucca_arrange_ab.py <jsonA> <slotA> <jsonB> <slotB> <bpm> <repA> <repB>
+```
+
+### 4. 只播放已保存的槽位
+
+```powershell
+python scripts\play_slot.py 3 1        # 槽 3 播放 1 遍
+python scripts\play_chain.py 0 1 1 1   # 槽 0×1 → 槽 1×1
+```
+
+### 5. 命令行调试
+
+```powershell
+python scripts\felucca_cli.py dump 0             # 读轨 0 的 0..63 步
+python scripts\felucca_cli.py desc 0 107         # 查轨内参数 107（CUT）的范围
+python scripts\felucca_cli.py readparam 0 103    # 读轨 0 的 WAVE 值
+python scripts\felucca_cli.py stop               # 停止播放
+```
+
+---
+
+## 脚本清单
+
+| 脚本 | 作用 |
+|---|---|
+| `felucca_link.py` | 直连核心库（动态设备匹配 / 收发 / INFO·DESC·STEP·SONG 解析）|
+| `felucca_cli.py` | 命令行工具 |
+| `felucca_arrange.py` | 单槽一键编曲（写 4 轨 → 存槽 → 播放）|
+| `felucca_arrange_ab.py` | 双槽链编曲 |
+| `play_slot.py` / `play_chain.py` | 仅播放脚本 |
+
 ---
 
 ## 目录结构
 
 ```
 felucca-editor/
-├── SKILL.md                          # 入口
-├── README.md                         # 本文件
-├── CHANGELOG.md                      # 版本历史
-├── LICENSE                           # MIT
-├── reference/
-│   ├── protocol.md                   # 帧格式、命令枚举、STEP/SONG 布局
-│   ├── params.md                     # 99 轨道参数 + 27 全局参数
-│   ├── sysx-map.md                   # DX7 标准参数映射
-│   └── arrangement-metrics.md        # 编曲质量指标
+├── SKILL.md                      # Claude Skill 入口
+├── README.md                     # 本文件
+├── CHANGELOG.md
+├── LICENSE
 ├── scripts/
-│   ├── felucca_link.py               # 直连核心库
-│   ├── felucca_cli.py                # 命令行工具
-│   ├── felucca_arrange.py            # 单槽一键编曲
-│   ├── felucca_arrange_ab.py         # 双槽链编曲
-│   ├── play_slot.py                  # 播放单槽
-│   └── play_chain.py                 # 播放多槽链
+│   ├── felucca_link.py           # 直连核心库
+│   ├── felucca_cli.py
+│   ├── felucca_arrange.py
+│   ├── felucca_arrange_ab.py
+│   ├── play_slot.py
+│   └── play_chain.py
+├── reference/
+│   ├── protocol.md               # 帧格式 / 命令表 / STEP·SONG 布局 / 直连坑
+│   ├── params.md                 # 111 轨道参数 + 27 全局参数 + 枚举（权威）
+│   ├── sysx-map.md               # 实机验证的参数映射速查
+│   └── arrangement-metrics.md    # 编曲质量指标（硬指标 + 参考方向）
 └── examples/
-    └── arrangement-recipes.md        # 编曲配方
+    └── arrangement-recipes.md    # 已验收的编曲配方
 ```
 
 ---
 
-## 安装
+## 参考文档
 
-### 1. 放置 Skill
+生成编曲数据前**必读**：
 
-把 `felucca-editor/` 放进以下任一目录：
-
-| 优先级 | 目录 | 说明 |
-|---|---|---|
-| 高 | `~/.dsh/skills/` | 个人全局 |
-| 中 | `<项目>/.dsh/skills/` | 项目专用 |
-| 低 | `~/.agents/skills/` | 跨 Agent 共享 |
-
-### 2. 创建独立 venv
-
-```bash
-cd scripts
-python -m venv venv
-venv\Scripts\activate        # Windows
-```
-
-**绝不装任何包进系统 Python**。直连方案零第三方依赖，只用 ctypes。
-
-### 3. 硬件准备
-
-- FM-1 刷入 **Felucca 1.1.5.1**（或兼容的 1.0.x）
-- USB 连接电脑
-- **关闭浏览器 / 任何 Web MIDI 会话**（设备输入为独占）
+- **[`reference/protocol.md`](reference/protocol.md)** — 帧格式、命令枚举、STEP/SONG 布局、INFO 解析、直连坑、设备名匹配
+- **[`reference/params.md`](reference/params.md)** — 111 轨道参数 + 27 全局参数 + 全部枚举（**权威参数表**）
+- **[`reference/sysx-map.md`](reference/sysx-map.md)** — 参数映射速查（实机验证）
+- **[`reference/arrangement-metrics.md`](reference/arrangement-metrics.md)** — 编曲质量指标（硬指标 + 参考方向）
+- **[`examples/arrangement-recipes.md`](examples/arrangement-recipes.md)** — 已验收配方
 
 ---
 
-## 使用
+## 关键坑速查
 
-### 首次验证
-
-```bash
-python scripts/felucca_cli.py info
-```
-
-应输出：
-```
-version='FELUCCA v1.1.5.1', nengines=14, pcount=99, gcount=27,
-nstep=64, pe0=91, ntrk=4, chainRows=16, uiCaps=9
-```
-
-三个关键值：`pcount=99` / `pe0=91` / `chainRows=16`。对上说明解析校准成功。
-
-### 日常指令示例
-
-| 你的话 | Skill 的动作 |
+| 坑 | 说明 |
 |---|---|
-| 写一段 12 小节 C 调布鲁斯 | 调 `felucca_arrange_ab.py` 双槽链 |
-| 把轨 1 换成 BRASS，Attack 拉满 | 发 `TRACK_PARAM` 设置参数 |
-| 播放槽位 A | `play_slot.py 0 1` |
-| dump 一下当前编曲 | `felucca_cli.py dump <track>` |
-
-### 命令行速查
-
-```bash
-# 设备信息
-python felucca_cli.py info
-
-# 参数描述
-python felucca_cli.py desc 1 0          # BPM
-python felucca_cli.py desc 0 29         # LEN
-
-# 读写步进
-python felucca_cli.py readstep <track> <step>
-python felucca_cli.py wtest <track> <step> <note>
-python felucca_cli.py dump <track>
-python felucca_cli.py restore <track>
-
-# 播放控制
-python felucca_cli.py play <slot> <repeat>
-python felucca_cli.py stop
-python felucca_cli.py qsong
-
-# 一键编曲
-python felucca_arrange.py <slot> <bpm> <repeat>
-python felucca_arrange_ab.py <jsonA> <slotA> <jsonB> <slotB> <bpm> <repA> <repB>
-```
-
----
-
-## 版本号规则
-
-从 `1.0.0` 起，严格遵循 [Semantic Versioning](https://semver.org/)：
-
-| 变更类型 | 版本号变化 | 示例 |
-|---|---|---|
-| **破坏性变更** | `MAJOR` | 协议不兼容、脚本接口重构 |
-| **新增功能** | `MINOR` | 新引擎、新参数、新脚本、结构重组 |
-| **修复/校准** | `PATCH` | 解析校准、bug fix、文档纠正 |
-
-### 当前版本：`1.2.0`
-
-- 适配 Felucca **1.1.5.1**
-- 99 轨道参数 + 27 全局参数
-- 结构重组：SKILL.md 精简 + 拆出 `reference/protocol.md` 和 `reference/params.md`
+| **ANALOG EDIT 移位** | v1.5 在 **101-110**（旧 91-98 变为 SYNC/INSERT 区）|
+| **STEP_GET 请求** | 只带 `[i]`，**不带 tr**（先 `TRACK [tr]` 选轨）|
+| **TIE 语义** | `time=1` 必须有前序 NOTE 起始步；全 TIE = 静音 |
+| **SONG 播放** | `op=1` 只配置行，**必须 `op=2` 才出声** |
+| **带符号参数** | FLT(-64~63) / TUNE(-50~50) / PAN(-64~63)，写 0-127 出错 |
+| **SWG 范围** | **0-100**，不是 0-127 |
+| **LEN 范围** | **1-64** |
+| **GATE 范围** | **1-127**（0 = 无声）|
+| **RATE 枚举** | 0-5（1/8~32T）|
+| **TRACK_DUMP 高字节** | v1.5 `(hi, lo)` **高字节在前**（SLOOP 是 `(lo, hi)`）|
+| **多行链 repeat>1** | 不稳；单遍链（repeat=1）稳定 |
 
 ---
 
 ## 已知限制
 
-- **仅支持 Windows**（依赖 winmm.dll）
+- **仅 Windows**（依赖 `winmm.dll`）
 - **多行链 `repeat>1` 不稳**（单遍链稳定）
-- **Felucca 固件为 Beta**，刷入有变砖风险
+- INSERT 效果 A/B/C 参数含义未完全逆向
+- SYNC / TRIG / POL / QNTZ / SPRD 参数范围待完整校准
+- Felucca 固件为 Beta，刷入有变砖风险
 
 ---
 
-## 用户硬约束
+## License
 
-1. 独立 venv，绝不装任何包进系统
-2. 播放验收以实际听声为准
-3. 修改音色/编曲后直接改文件与设备，不输出提示词正文
-4. 回复先给一句话总结
-
----
-
-## 许可
-
-MIT License，详见 [LICENSE](LICENSE)。
-
-## 免责声明
-
-Felucca 固件仍处于 Beta 阶段，刷入与使用存在变砖风险，请自行承担。
-本 Skill 为第三方工具，与 M-VAVE 官方无关，也未使用 Felucca 源码。
-
-## 相关项目
-
-- [SLOOP Editor Skill](https://github.com/hunterxiong2026/fm1-sloop-editor-2026)：
-  同协议族，针对 SLOOP 固件的 4 轨 Groovebox 编曲
+[MIT](LICENSE) © hunterxiong2026
